@@ -1,5 +1,7 @@
 use core::panic;
 use std::collections::BTreeMap;
+use base64::engine::Config;
+use serde::Deserialize;
 
 use tendermint_rpc::{WebSocketClient, SubscriptionClient};
 use tendermint_rpc::query::{EventType, Query};
@@ -52,7 +54,81 @@ pub type TXMap = BTreeMap<String, Vec<String>>;
 
 #[derive(Debug, Clone)]
 pub struct ConfirmDepositStarted {
-    
+    chain: String,
+    participants: String,
+    tx_id: String,
+    evm_deposit_address: String,
+    action: String,
+}
+
+impl ConfirmDepositStarted {
+    fn from_tx_events(ev: TXMap) -> Self {
+        Self {
+            chain: ev["axelar.evm.v1beta1.ConfirmDepositStarted.chain"].get(0).unwrap().to_string(),
+            participants: ev["axelar.evm.v1beta1.ConfirmDepositStarted.participants"].get(0).unwrap().to_string(),
+            tx_id: ev["axelar.evm.v1beta1.ConfirmDepositStarted.tx_id"].get(0).unwrap().to_string(),
+            evm_deposit_address: ev["axelar.evm.v1beta1.ConfirmDepositStarted.deposit_address"].get(0).unwrap().to_string(),
+            action: ev["message.action"].get(0).unwrap().to_string()
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ConfirmGatewayTxStartedEvents {
+    chain: String,
+    participants: PollParticipants,
+    tx_id: String,
+    message_action: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct PollParticipants {
+    poll_id: String,
+    participants: Vec<String>,
+}
+
+impl ConfirmGatewayTxStartedEvents {
+    fn from_tx_events(ev: TXMap) -> Self {
+        let participants = serde_json::from_str(ev["axelar.evm.v1beta1.ConfirmGatewayTxStarted.participants"].get(0).unwrap()).unwrap();
+        Self {
+            chain: ev["axelar.evm.v1beta1.ConfirmGatewayTxStarted.chain"].get(0).unwrap().to_string(),
+            participants,
+            tx_id: ev["axelar.evm.v1beta1.ConfirmGatewayTxStarted.tx_id"].get(0).unwrap().to_string(),
+            message_action: ev["message.action"].get(0).unwrap().to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ConfirmKeyTransferStartedEvents {
+    chain: String,
+    participants: String,
+    tx_id: String,
+    message_action: String,
+}
+
+impl ConfirmKeyTransferStartedEvents {
+    fn from_tx_events(ev: TXMap) -> Self {
+        Self {
+        chain: ev["axelar.evm.v1beta1.ConfirmKeyTransferStarted.chain"].get(0).unwrap().to_string(),
+        participants: ev["axelar.evm.v1beta1.ConfirmKeyTransferStarted.participants"].get(0).unwrap().to_string(),
+        tx_id: ev["axelar.evm.v1beta1.ConfirmKeyTransferStarted.tx_id"].get(0).unwrap().to_string(),
+        message_action: ev["message.action"].get(0).unwrap().to_string(),
+            }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PollVoteEvent {
+    poll_state: String,
+}
+
+impl PollVoteEvent {
+    fn from_tx_events(ev: TXMap) -> Self {
+        Self {
+            poll_state: ev["axelar.vote.v1beta1.Voted.state"].get(0).unwrap().to_string()
+        }
+    }
 }
 
 // #[derive(Debug, Clone)]
@@ -84,9 +160,37 @@ async fn main() {
             match ev.data {
                 EventData::NewBlock { block, result_begin_block, result_end_block } => todo!(),
                 EventData::Tx { tx_result } => {
-                    let tx = BaseTransaction::from_tx_events(events);
+                    let tx = BaseTransaction::from_tx_events(events.clone());
 
-                    dbg!(tx);
+                    match tx.message_action.as_str() {
+                        "ConfirmERC20Deposit" | "ConfirmDeposit" => {
+                            if events.contains_key("axelar.evm.v1beta1.ConfirmDepositStarted.participants") {
+                                let sp_tx = ConfirmDepositStarted::from_tx_events(events);
+                                dbg!(sp_tx);
+                            }
+                        },
+                        "ConfirmGatewayTx" => {
+                            if events.contains_key("axelar.evm.v1beta1.ConfirmGatewayTxStarted.participants") {
+                                let sp_tx = ConfirmGatewayTxStartedEvents::from_tx_events(events);
+                                dbg!(sp_tx);
+                            }
+                        },
+                        "ConfirmTransferKey" => {
+                            if events.contains_key("axelar.evm.v1beta1.ConfirmKeyTransferStarted.participants") {
+                                let sp_tx = ConfirmKeyTransferStartedEvents::from_tx_events(events);
+                                dbg!(sp_tx);
+                            }
+                        },
+                        other => {
+                            if events.contains_key("axelar.vote.v1beta1.Voted.state") {
+                                dbg!(other);
+                                let sp_tx = PollVoteEvent::from_tx_events(events);
+                                dbg!(sp_tx);
+                            }
+                        }
+                        // m => { if m != "RefundMsgRequest" { dbg!(m); } }
+                    }
+                    // dbg!(tx);
 
                 },
                 EventData::GenericJsonEvent(_) => todo!(),
